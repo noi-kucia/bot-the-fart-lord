@@ -1,0 +1,10 @@
+[project]
+name = "bot-the-fart-lord"
+version = "0.1.0"
+description = "Their majesty the fart Lord is a telegram bot that will assis you in you fart journey"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "python-dotenv>=1.2.2",
+    "python-telegram-bot>=22.7",
+]
