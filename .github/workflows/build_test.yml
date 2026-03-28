@@ -1,0 +1,44 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Create .env file
+        run: |
+          echo BOT_TOKEN=${{ secrets.BOT_TOKEN }} > src/env/.env
+
+      - name: Start the bot
+        run: |
+          uv run src/main.py &
+          echo $! > bot.pid
+          sleep 5
+
+      - name: Stop the bot
+        run: |
+          kill $(cat bot.pid)

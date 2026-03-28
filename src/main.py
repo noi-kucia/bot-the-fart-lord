@@ -10,7 +10,7 @@ from telegram import ForceReply, Update
 from telegram.constants import ReactionEmoji
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
-load_dotenv("env/.env")
+load_dotenv(Path(__file__).parent / "env/.env")
 
 # Enable logging
 logging.basicConfig(format="%(asctime)s - %(name)s[%(levelname)s]: %(message)s", level=logging.INFO)
