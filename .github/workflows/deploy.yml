@@ -36,11 +36,18 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             cd /fartlord
+            
+            # Install uv if not installed
             if ! command -v uv &> /dev/null; then
               curl -LsSf https://astral.sh/uv/install.sh | sh
               export PATH="$HOME/.local/bin:$PATH"
             fi
+            
+            # Sync uv dependencies
             ~/.local/bin/uv sync --frozen
+            
+            # Fill env file
             echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > src/env/.env
-            pkill -f "uv run src/main.py" || true
+            
+            # Restart service that runs application
             sudo systemctl restart fartlord.service
