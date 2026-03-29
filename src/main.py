@@ -1,11 +1,13 @@
 """Main file."""
 
+import asyncio
 import datetime
 import logging
 import random
 from os import environ
 from pathlib import Path
 
+import telegram
 from dotenv import load_dotenv
 from telegram import ForceReply, Update
 from telegram.constants import ReactionEmoji
@@ -21,6 +23,32 @@ logging.basicConfig(format="%(asctime)s - %(name)s[%(levelname)s]: %(message)s",
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+
+async def send_debug_notification(message: str) -> None:
+    """Send a debug notification to all chats and groups listed in NOTIFICATION_CHAT_IDS environmental var."""
+    ids = environ.get("NOTIFICATION_CHAT_IDS", "")
+
+    # Return if no chats were specified
+    if not ids:
+        logger.warning("No notification chat IDs provided. Skipping debug notification.")
+        return
+
+    bot = telegram.Bot(environ.get("BOT_TOKEN", None))
+
+    # Send message to all chats and groups listed in NOTIFICATION_CHAT_IDS environmental var
+    for chat_id_str in ids.split(":"):
+        # Validate chat ID and convert to int
+        if chat_id_str:
+            try:
+                chat_id = int(chat_id_str)
+                await bot.send_message(chat_id=chat_id, text=message)
+            except ValueError:
+                logger.warning("Invalid chat ID '%s' in NOTIFICATION_CHAT_IDS. Skipping.", chat_id_str)
+                continue
+            except Exception as e:
+                logger.warning("Failed to send message to chat %s: %s", chat_id, e)
+                continue
 
 
 # Define a few command handlers. These usually take the two arguments update and
@@ -80,8 +108,6 @@ def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token.
     application = Application.builder().token(environ.get("BOT_TOKEN", None)).build()
-    global BOT_START_TIME
-    BOT_START_TIME = datetime.datetime.now(tz=datetime.UTC)
 
     # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
@@ -90,6 +116,13 @@ def main() -> None:
 
     # Voice message
     application.add_handler(MessageHandler(filters.VOICE, callback=reply_to_fart_voice))
+
+    # Set the start time of the bot
+    global BOT_START_TIME
+    BOT_START_TIME = datetime.datetime.now(tz=datetime.UTC)
+
+    # Notify when the bot starts
+    asyncio.run(send_debug_notification("Bot started at " + BOT_START_TIME.strftime("%Y-%m-%d %H:%M:%S")))
 
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
