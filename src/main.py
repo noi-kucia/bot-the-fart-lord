@@ -1,5 +1,6 @@
 """Main file."""
 
+import datetime
 import logging
 import random
 from os import environ
@@ -8,9 +9,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telegram import ForceReply, Update
 from telegram.constants import ReactionEmoji
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import Application, CallbackContext, CommandHandler, MessageHandler, filters
 
 load_dotenv(Path(__file__).parent / "env/.env")
+
+# Bot start time to measure uptime
+BOT_START_TIME: datetime.datetime = datetime.datetime.now(tz=datetime.UTC)
 
 # Enable logging
 logging.basicConfig(format="%(asctime)s - %(name)s[%(levelname)s]: %(message)s", level=logging.INFO)
@@ -25,18 +29,35 @@ async def start(update: Update, _: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
     await update.message.reply_html(
-        rf"Hi {user.mention_html()}!",
+        f"yo, {user.mention_html()}!\nShow me your farts if not afraid to shit your pants",
         reply_markup=ForceReply(selective=True),
     )
 
+
 async def help_command(update: Update, _: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
-    await update.message.reply_text("Help!")
+    await update.message.reply_text("Help yourself, nigga!")
+
+
+async def uptime_command(update: Update, _: CallbackContext) -> None:
+    """Send the current bot uptime."""
+    uptime = datetime.datetime.now(tz=datetime.UTC) - BOT_START_TIME
+    total_secs = int(uptime.total_seconds())
+    days = total_secs // 86400
+    hours = (total_secs % 86400) // 3600
+    minutes = (total_secs % 3600) // 60
+    seconds = total_secs % 60
+    response = "Uptime:"
+    if days:
+        response += f" {days} days" if days > 1 else f" {days} day"
+    response += f" {hours} h {minutes} min {seconds} sec"
+    await update.message.reply_text(response)
 
 
 async def echo(update: Update, _: CallbackContext) -> None:
     """Echo the user message."""
     await update.message.reply_text(update.message.text)
+
 
 async def reply_to_fart_voice(update: Update, _: CallbackContext) -> None:
     """Reply to the fart voice message with a random phrase with 20% chance and set a poop reaction."""
@@ -59,13 +80,13 @@ def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token.
     application = Application.builder().token(environ.get("BOT_TOKEN", None)).build()
+    global BOT_START_TIME
+    BOT_START_TIME = datetime.datetime.now(tz=datetime.UTC)
 
     # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-
-    # on non command i.e message - echo the message on Telegram
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    application.add_handler(CommandHandler("uptime", uptime_command))
 
     # Voice message
     application.add_handler(MessageHandler(filters.VOICE, callback=reply_to_fart_voice))
