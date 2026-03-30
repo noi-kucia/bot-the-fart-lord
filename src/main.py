@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import logging
 import random
+import sqlite3
 from os import environ
 from pathlib import Path
 
@@ -17,6 +18,31 @@ load_dotenv(Path(__file__).parent / "env/.env")
 
 DEBUG = environ.get("DEBUG", "false").lower() == "true"
 
+# Database
+conn = sqlite3.connect(Path(__file__).parent.parent / "database.db")
+db = conn.cursor()
+db.execute(
+    """
+CREATE TABLE IF NOT EXISTS farts
+(
+   id
+   INTEGER
+   PRIMARY
+   KEY
+   AUTOINCREMENT,
+   message_id
+   INTEGER,
+   user_id
+   INTEGER,
+   send_datetime
+   TEXT,
+   chat_id
+   INTEGER,
+   voice_file_id
+   TEXT
+)
+"""
+)
 
 # Bot start time to measure uptime
 BOT_START_TIME: datetime.datetime = datetime.datetime.now(tz=datetime.UTC)
@@ -26,6 +52,16 @@ logging.basicConfig(format="%(asctime)s - %(name)s[%(levelname)s]: %(message)s",
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+
+def save_fart(message_id: int, user_id: int, chat_id: int, send_datetime: str, voice_file_id: str) -> None:
+    """Save fart to the database."""
+    db.execute(
+        "INSERT INTO farts VALUES (?, ?, ?, ?, ?, ?)",
+        (None, message_id, user_id, send_datetime, chat_id, voice_file_id),
+    )
+    conn.commit()
+    logger.info("fart %s is saved to the database", message_id)
 
 
 async def send_debug_notification(message: str) -> None:
@@ -97,10 +133,29 @@ async def echo(update: Update, _: CallbackContext) -> None:
     await update.message.reply_text(update.message.text)
 
 
+async def fart_callback(update: Update, context: CallbackContext) -> None:
+    """
+    Process a voice message containing fart.
+
+    Bot randomly replies on the message and saves the fart to its database.
+    """
+    logger.info("Received a fart voice message")
+
+    await reply_to_fart_voice(update, context)  # Reply to fart
+
+    # Save the fart to the database
+    kwargs = {
+        "message_id": update.message.message_id,
+        "user_id": update.message.from_user.id,
+        "chat_id": update.message.chat_id,
+        "send_datetime": update.message.date.isoformat(),
+        "voice_file_id": update.message.voice.file_id,
+    }
+    save_fart(**kwargs)
+
+
 async def reply_to_fart_voice(update: Update, _: CallbackContext) -> None:
     """Reply to the fart voice message with a random phrase with 20% chance and set a poop reaction."""
-    logger.info("Received voice message")
-
     # Set the poop reaction on the message
     await update.message.set_reaction(ReactionEmoji.PILE_OF_POO)
 
@@ -125,7 +180,8 @@ def main() -> None:
     application.add_handler(CommandHandler("uptime", uptime_command))
 
     # Voice message
-    application.add_handler(MessageHandler(filters.VOICE, callback=reply_to_fart_voice))
+    # NOTE: Currently assuming that all voice messages are farts
+    application.add_handler(MessageHandler(filters.VOICE, callback=fart_callback))
 
     # Set the start time of the bot
     global BOT_START_TIME
