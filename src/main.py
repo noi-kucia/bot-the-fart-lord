@@ -15,6 +15,9 @@ from telegram.ext import Application, CallbackContext, CommandHandler, MessageHa
 
 load_dotenv(Path(__file__).parent / "env/.env")
 
+DEBUG = environ.get("DEBUG", "false").lower() == "true"
+
+
 # Bot start time to measure uptime
 BOT_START_TIME: datetime.datetime = datetime.datetime.now(tz=datetime.UTC)
 
@@ -26,7 +29,15 @@ logger = logging.getLogger(__name__)
 
 
 async def send_debug_notification(message: str) -> None:
-    """Send a debug notification to all chats and groups listed in NOTIFICATION_CHAT_IDS environmental var."""
+    """Send a debug notification to all chats and groups listed in NOTIFICATION_CHAT_IDS environmental var
+    if in production or use logger instead.
+    """
+    # If not in production, use logger instead
+    if DEBUG:
+        logger.info(message)
+        return
+
+    # Get chat IDs from environmental variable
     ids = environ.get("NOTIFICATION_CHAT_IDS", "")
 
     # Return if no chats were specified
@@ -34,9 +45,8 @@ async def send_debug_notification(message: str) -> None:
         logger.warning("No notification chat IDs provided. Skipping debug notification.")
         return
 
-    bot = telegram.Bot(environ.get("BOT_TOKEN", None))
-
     # Send message to all chats and groups listed in NOTIFICATION_CHAT_IDS environmental var
+    bot = telegram.Bot(environ.get("BOT_TOKEN", None))
     for chat_id_str in ids.split(":"):
         # Validate chat ID and convert to int
         if chat_id_str:
