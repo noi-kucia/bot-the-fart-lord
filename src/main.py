@@ -203,7 +203,7 @@ async def _send_group_stats(update: Update, _: CallbackContext, farts: list) -> 
 def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token.
-    application = Application.builder().token(environ.get("BOT_TOKEN", None)).build()
+    application = Application.builder().token(environ.get("BOT_TOKEN", None)).read_timeout(30).write_timeout(30).build()
 
     # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
