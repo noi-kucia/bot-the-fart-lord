@@ -12,7 +12,7 @@ import telegram
 from dotenv import load_dotenv
 from telegram import ForceReply, Update
 from telegram.constants import ChatType, ReactionEmoji
-from telegram.ext import Application, CallbackContext, CommandHandler, MessageHandler, filters
+from telegram.ext import AIORateLimiter, Application, CallbackContext, CommandHandler, MessageHandler, filters
 
 load_dotenv(Path(__file__).parent / "env/.env")
 
@@ -203,7 +203,14 @@ async def _send_group_stats(update: Update, _: CallbackContext, farts: list) -> 
 def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token.
-    application = Application.builder().token(environ.get("BOT_TOKEN", None)).read_timeout(30).write_timeout(30).build()
+    application = (
+        Application.builder()
+        .token(environ.get("BOT_TOKEN", None))
+        .read_timeout(30)
+        .write_timeout(30)
+        .rate_limiter(AIORateLimiter(group_time_period=25, group_max_rate=15, max_retries=2))
+        .build()
+    )
 
     # on different commands - answer in Telegram
     application.add_handler(CommandHandler("start", start))
