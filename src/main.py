@@ -11,7 +11,7 @@ from pathlib import Path
 import telegram
 from dotenv import load_dotenv
 from telegram import ForceReply, Update
-from telegram.constants import ReactionEmoji
+from telegram.constants import ChatType, ReactionEmoji
 from telegram.ext import Application, CallbackContext, CommandHandler, MessageHandler, filters
 
 load_dotenv(Path(__file__).parent / "env/.env")
@@ -169,6 +169,37 @@ async def reply_to_fart_voice(update: Update, _: CallbackContext) -> None:
     await update.message.reply_text(phrase, reply_to_message_id=update.message.message_id)
 
 
+async def stats_command(update: Update, _: CallbackContext) -> None:
+    """Send a message with statistics on registered farts in chat."""
+    # Fetch chat farts data from the database
+    chat_id = update.message.chat_id
+    chat_farts = db.execute("SELECT user_id, send_datetime FROM farts WHERE chat_id = ?", (chat_id,)).fetchall()
+
+    # Format and send statistics based on chat type
+    match update.message.chat.type:
+        case ChatType.PRIVATE:
+            await _send_private_stats(update, _, chat_farts)
+        case ChatType.GROUP:
+            await _send_group_stats(update, _, chat_farts)
+        case _:
+            logger.debug("Unknown chat type: %s", update.message.chat.type)
+
+
+async def _send_private_stats(update: Update, _: CallbackContext, chat_farts: list) -> None:
+    """Send message with private farts."""
+    user_id = update.message.from_user.id
+    all_farts = db.execute("SELECT user_id, send_datetime FROM farts WHERE user_id = ?", (user_id,)).fetchall()
+    await update.message.reply_text(
+        f"Bro, you farted {len(chat_farts)} time just here and {len(all_farts)} farts in general!"
+        f"\nDamn! Are you alright?"
+    )
+
+
+async def _send_group_stats(update: Update, _: CallbackContext, farts: list) -> None:
+    """Send message with group farts statistics."""
+    await update.message.reply_text(f"Nigga, I found at least {len(farts)} farts in this chat, it's getting hot!")
+
+
 def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token.
@@ -178,6 +209,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("uptime", uptime_command))
+    application.add_handler(CommandHandler("stats", stats_command))
 
     # Voice message
     # NOTE: Currently assuming that all voice messages are farts
