@@ -23,25 +23,28 @@ conn = sqlite3.connect(Path(__file__).parent.parent / "database.db")
 db = conn.cursor()
 db.execute(
     """
-CREATE TABLE IF NOT EXISTS farts
-(
-   id
-   INTEGER
-   PRIMARY
-   KEY
-   AUTOINCREMENT,
-   message_id
-   INTEGER,
-   user_id
-   INTEGER,
-   send_datetime
-   TEXT,
-   chat_id
-   INTEGER,
-   voice_file_id
-   TEXT
+    CREATE TABLE IF NOT EXISTS farts
+    (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id    INTEGER,
+        user_id       INTEGER,
+        send_datetime TEXT,
+        chat_id       INTEGER,
+        voice_file_id TEXT
+    )
+    """
 )
-"""
+
+db.execute(
+    """
+    CREATE TABLE IF NOT EXISTS chats
+    (
+        chat_id          INTEGER PRIMARY KEY,
+        chat_type        TEXT,
+        setting_timezone TEXT DEFAULT 'UTC',
+        setting_language TEXT DEFAULT 'en'
+    )
+    """
 )
 
 # Bot start time to measure uptime
@@ -54,6 +57,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+# ============================= Database functions =============================
+#   These are temporal until switching to something more powerful than SQLite
+#          which is used to speed development process on early stages
+# ================================== Start =====================================
+
+
 def save_fart(message_id: int, user_id: int, chat_id: int, send_datetime: str, voice_file_id: str) -> None:
     """Save fart to the database."""
     db.execute(
@@ -62,6 +71,41 @@ def save_fart(message_id: int, user_id: int, chat_id: int, send_datetime: str, v
     )
     conn.commit()
     logger.info("fart %s is saved to the database", message_id)
+
+
+async def save_chat(chat_id: int, chat_type: ChatType | None = None) -> None:
+    """
+    Save chat to the database.
+
+    Args:
+        chat_id (int): ID of the chat to save.
+        chat_type: Type of the chat . If not provided, bot will get it from the API.
+    """
+    # Get chat type if not provided
+    if chat_type is None:
+        bot = telegram.Bot(environ.get("BOT_TOKEN", None))
+        chat_type = (await bot.get_chat(chat_id)).type
+
+    # Save chat to the database
+    db.execute("INSERT OR IGNORE INTO chats (chat_id, chat_type) VALUES (?, ?)", (chat_id, chat_type))
+    conn.commit()
+    logger.info("chat %s is saved to the database", chat_id)
+
+
+async def get_chat_settings(chat_id: int) -> dict:
+    """Get chat settings from the database."""
+    chat = db.execute("SELECT * FROM chats WHERE chat_id = ?", (chat_id,)).fetchone()
+
+    # Create with defaults if chat is not in the database
+    if chat is None:
+        await save_chat(chat_id)
+        chat = db.execute("SELECT * FROM chats WHERE chat_id = ?", (chat_id,)).fetchone()
+
+    return {"timezone": chat[2], "language": chat[3]}
+
+
+# ============================= Database functions =============================
+# =================================== END ======================================
 
 
 async def send_debug_notification(message: str) -> None:
