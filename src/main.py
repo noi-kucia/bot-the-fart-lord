@@ -7,16 +7,27 @@ import random
 import sqlite3
 from os import environ
 from pathlib import Path
+from typing import Literal
 
 import telegram
 from dotenv import load_dotenv
-from telegram import ForceReply, Update
+from telegram import CallbackQuery, ForceReply, Update
 from telegram.constants import ChatType, ReactionEmoji
-from telegram.ext import AIORateLimiter, Application, CallbackContext, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    AIORateLimiter,
+    Application,
+    CallbackContext,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
 load_dotenv(Path(__file__).parent / "env/.env")
 
 DEBUG = environ.get("DEBUG", "false").lower() == "true"
+
+SUPPORTED_LANGUAGES = ["en", "pl", "ru"]
 
 # Database
 conn = sqlite3.connect(Path(__file__).parent.parent / "database.db")
@@ -102,6 +113,52 @@ async def get_chat_settings(chat_id: int) -> dict:
         chat = db.execute("SELECT * FROM chats WHERE chat_id = ?", (chat_id,)).fetchone()
 
     return {"timezone": chat[2], "language": chat[3]}
+
+
+async def update_chat_settings(
+    chat_id: int, timezone: str | None = None, language: Literal["en", "pl", "ru"] | None = None
+) -> dict:
+    """
+    Update chat settings in the database.
+
+    Values set to None will not be affected.
+
+    Args:
+        chat_id: Id of the chat to apply the settings to.
+        timezone: Timezone to set from pytz.common_timezones list e.g. 'UTC', 'GMT', 'Europe/Paris'.
+        language: Language code to set. Must be one of SUPPORTED_LANGUAGES.
+
+    Returns:
+            Updated settings as dict same as get_chat_settings returns.
+    """
+    # Build a single UPDATE query with only non-None values
+    updates = []
+    params = []
+
+    if timezone is not None:
+        updates.append("setting_timezone = ?")
+        params.append(timezone)
+
+    if language is not None:
+        updates.append("setting_language = ?")
+        params.append(language)
+
+    # Execute single query if there are any updates to apply
+    if updates:
+        params.append(chat_id)
+        query = "UPDATE chats SET " + ", ".join(updates) + " WHERE chat_id = ?"
+        db.execute(query, params)
+        conn.commit()
+
+    logger.info(
+        "chat %s settings are updated to timezone: %s, language: %s",
+        chat_id,
+        timezone,
+        language,
+    )
+
+    # Return updated settings
+    return await get_chat_settings(chat_id)
 
 
 # ============================= Database functions =============================
@@ -244,6 +301,56 @@ async def _send_group_stats(update: Update, _: CallbackContext, farts: list) -> 
     await update.message.reply_text(f"Nigga, I found at least {len(farts)} farts in this chat, it's getting hot!")
 
 
+async def settings_command(update: Update, _: CallbackContext) -> None:
+    """Send current chat settings with inline keyboard to change them."""
+    chat_id = update.message.chat_id
+
+    # Get chat settings
+    settings = await get_chat_settings(chat_id)
+
+    # Create inline keyboard with options
+    keyboard = [
+        [
+            telegram.InlineKeyboardButton("Timezone", callback_data="setting_timezone_change"),
+            telegram.InlineKeyboardButton("Language", callback_data="setting_language_change"),
+        ]
+    ]
+
+    await update.message.reply_text(f"your settings: {settings}", reply_markup=telegram.InlineKeyboardMarkup(keyboard))
+
+
+async def setting_change_callback(update: Update, _: CallbackContext) -> None:
+    """
+    Handle callback query for changing chat settings.
+
+    Each callback data must start with "setting_<settingName>_change" to be handled by this function.
+    """
+    query: CallbackQuery = update.callback_query
+    setting_name = query.data.split("_")[1]
+
+    if setting_name == "timezone":
+        await query.edit_message_text("Timezone change is not implemented yet.")
+    elif setting_name == "language":
+        keyboard = [
+            [telegram.InlineKeyboardButton(lang, callback_data=f"setting_language_set_{lang}")]
+            for lang in SUPPORTED_LANGUAGES
+        ]
+        await query.edit_message_text("Select language:", reply_markup=telegram.InlineKeyboardMarkup(keyboard))
+    else:
+        logger.warning("Unknown setting name in callback query: %s", setting_name)
+
+
+async def setting_language_set_callback(update: Update, _: CallbackContext) -> None:
+    """Handle callback query for setting language."""
+    query: CallbackQuery = update.callback_query
+    language = query.data.split("_")[-1]
+
+    # Change language in the database
+    chat_id = update.effective_chat.id
+    await update_chat_settings(chat_id, language=language)
+    await query.edit_message_text(f"Language changed to {language}.")
+
+
 def main() -> None:
     """Start the bot."""
     # Create the Application and pass it your bot's token.
@@ -261,6 +368,11 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("uptime", uptime_command))
     application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("settings", settings_command))
+
+    # Button handlers
+    application.add_handler(CallbackQueryHandler(setting_change_callback, pattern=r"setting_.*_change"))
+    application.add_handler(CallbackQueryHandler(setting_language_set_callback, pattern=r"setting_language_set_.*"))
 
     # Voice message
     # NOTE: Currently assuming that all voice messages are farts
