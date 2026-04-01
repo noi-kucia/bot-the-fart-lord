@@ -292,11 +292,6 @@ async def uptime_command(update: Update, _: CallbackContext) -> None:
     await update.message.reply_text(response)
 
 
-async def echo(update: Update, _: CallbackContext) -> None:
-    """Echo the user message."""
-    await update.message.reply_text(update.message.text)
-
-
 async def fart_callback(update: Update, context: CallbackContext) -> None:
     """
     Process a voice message containing fart.
