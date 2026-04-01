@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-04-01 12:23+0200\n"
+"POT-Creation-Date: 2026-04-01 19:39+0200\n"
 "PO-Revision-Date: 2026-04-01 12:23+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -19,6 +19,30 @@ msgstr ""
 "Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 "
 "|| n%100>=20) ? 1 : 2);\n"
 
-#: src/main.py:236
+#: src/main.py:290
 msgid "Help yourself, nigga!"
 msgstr "Sam sobie pomóż, nigga!"
+
+#: src/main.py:367
+#, python-format
+msgid ""
+"Bro, you farted %(num_of_chat_farts)d time just here and "
+"%(num_of_total_farts)d farts in general!\n"
+"Damn! Are you alright?"
+msgstr ""
+
+#: src/main.py:391
+msgid "Timezone"
+msgstr ""
+
+#: src/main.py:392
+msgid "Language"
+msgstr ""
+
+#: src/main.py:412
+msgid "Timezone change is not implemented yet."
+msgstr ""
+
+#: src/main.py:418
+msgid "Select language:"
+msgstr ""
