@@ -329,7 +329,7 @@ async def help_command(update: Update, __: CallbackContext) -> None:
     await update.message.reply_text(_("Help yourself, nigga!"))
 
 
-async def uptime_command(update: Update, _: CallbackContext) -> None:
+async def uptime_command(update: Update, __: CallbackContext) -> None:
     """Send the current bot uptime."""
     uptime = datetime.datetime.now(tz=datetime.UTC) - BOT_START_TIME
     total_secs = int(uptime.total_seconds())
