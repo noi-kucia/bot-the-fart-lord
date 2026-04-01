@@ -7,6 +7,7 @@ import gettext
 import logging
 import random
 import sqlite3
+import subprocess
 from functools import wraps
 from os import environ
 from pathlib import Path
@@ -30,12 +31,35 @@ load_dotenv(Path(__file__).parent / "env/.env")
 
 DEBUG = environ.get("DEBUG", "false").lower() == "true"
 
+# Enable logging
+logging.basicConfig(format="%(asctime)s - %(name)s[%(levelname)s]: %(message)s", level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+
 # Localization
+locales_dir = Path(__file__).parent.parent / "locales"
+
+
+def needs_compile(po, mo):
+    """Check if po needs to be (re)compiled."""
+    return not mo.exists() or Path(po).stat().st_mtime > Path(mo).stat().st_mtime
+
+
+def compile_translations():
+    """Compile .mo localization files if some are missing or .po file was updated."""
+    for po in locales_dir.rglob("*.po"):
+        mo = po.with_suffix(".mo")
+        locale = po.parent.parent.name
+        if needs_compile(po, mo):
+            logger.info("Localization: locale %s is obsolete or absent, compiling from %s", locale, po)
+            subprocess.run(["msgfmt", str(po), "-o", str(mo)], check=True)
+
+
 SUPPORTED_LANGUAGES = ["en", "pl", "ru"]
+compile_translations()  # Compile translations on startup if needed
 languages = {
-    lang: gettext.translation(
-        "messages", localedir=Path(__file__).parent.parent / "locales", languages=[lang], fallback=True
-    )
+    lang: gettext.translation("messages", localedir=locales_dir, languages=[lang], fallback=True)
     for lang in SUPPORTED_LANGUAGES
 }
 translator_var = contextvars.ContextVar("translator", default=lambda x: x)
@@ -104,12 +128,6 @@ db.execute(
 
 # Bot start time to measure uptime
 BOT_START_TIME: datetime.datetime = datetime.datetime.now(tz=datetime.UTC)
-
-# Enable logging
-logging.basicConfig(format="%(asctime)s - %(name)s[%(levelname)s]: %(message)s", level=logging.INFO)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
 
 
 # ============================= Database functions =============================
@@ -254,7 +272,7 @@ async def start(update: Update, _: CallbackContext) -> None:
 
 
 @localized
-async def help_command(update: Update, _: CallbackContext) -> None:
+async def help_command(update: Update, __: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
     await update.message.reply_text(_("Help yourself, nigga!"))
 
