@@ -33,6 +33,9 @@ jobs:
         run: |
           echo BOT_TOKEN=${{ secrets.BOT_TOKEN }} > src/env/.env
 
+      - name: install system dependencies
+        run: sudo apt-get install gettext -y
+
       - name: Start the bot
         run: |
           uv run src/main.py &
