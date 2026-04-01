@@ -23,9 +23,20 @@ jobs:
           port: ${{ secrets.VPS_PORT }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: "src/,pyproject.toml,uv.lock,resources/"
+          source: "./*"
           target: "/fartlord/"
           strip_components: 0
+
+      - name: Install uv
+        run: |
+          if ! command -v uv &> /dev/null; then
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
+          fi
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get install gettext -y
 
       - name: Run commands on VPS
         uses: appleboy/ssh-action@v1.0.3
@@ -36,12 +47,6 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             cd /fartlord
-
-            # Install uv if not installed
-            if ! command -v uv &> /dev/null; then
-              curl -LsSf https://astral.sh/uv/install.sh | sh
-              export PATH="$HOME/.local/bin:$PATH"
-            fi
 
             # Sync uv dependencies
             ~/.local/bin/uv sync --frozen
