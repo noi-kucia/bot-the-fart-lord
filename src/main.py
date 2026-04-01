@@ -1,10 +1,14 @@
 """Main file."""
 
 import asyncio
+import contextvars
 import datetime
+import gettext
 import logging
 import random
 import sqlite3
+import subprocess
+from functools import wraps
 from os import environ
 from pathlib import Path
 from typing import Literal
@@ -27,7 +31,123 @@ load_dotenv(Path(__file__).parent / "env/.env")
 
 DEBUG = environ.get("DEBUG", "false").lower() == "true"
 
-SUPPORTED_LANGUAGES = ["en", "pl", "ru"]
+# Enable logging
+logging.basicConfig(format="%(asctime)s - %(name)s[%(levelname)s]: %(message)s", level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+
+# Localization
+locales_dir = Path(__file__).parent.parent / "locales"
+
+
+def make_logged_gettext(translator, lang_code):
+    """Log missing translations."""
+
+    def wrapped(msg):
+        translated = translator(msg)
+        if translated == msg and lang_code != "en":  # Message is not translated
+            logger.warning("Missing translation: lang=%s msgid=%r", lang_code, msg)
+        return translated
+
+    return wrapped
+
+
+def make_logged_ngettext(translator, lang_code):
+    """Log missing plural translations."""
+
+    def wrapped(singular, plural, n):
+        translated = translator(singular, plural, n)
+        if translated in (singular, plural) and lang_code != "en":  # Message is not translated
+            logger.warning("Missing translation: lang=%s msgid=%r msgid_plural=%r", lang_code, singular, plural)
+        return translated
+
+    return wrapped
+
+
+def needs_compile(po, mo):
+    """Check if po needs to be (re)compiled."""
+    return not mo.exists() or Path(po).stat().st_mtime > Path(mo).stat().st_mtime
+
+
+def compile_translations():
+    """Compile .mo localization files if some are missing or .po file was updated."""
+    for po in locales_dir.rglob("*.po"):
+        mo = po.with_suffix(".mo")
+        locale = po.parent.parent.name
+        if needs_compile(po, mo):
+            logger.info("Localization: locale %s is obsolete or absent, compiling from %s", locale, po)
+            subprocess.run(["msgfmt", str(po), "-o", str(mo)], check=True)
+
+
+# Extract all supported languages from the locales directory
+SUPPORTED_LANGUAGES = [lang.name for lang in locales_dir.glob("*") if lang.is_dir()]
+
+compile_translations()  # Compile translations on startup if needed
+languages = {
+    lang: gettext.translation("messages", localedir=locales_dir, languages=[lang]) for lang in SUPPORTED_LANGUAGES
+}
+
+translation_defaults = {
+    "gettext": lambda x: x,
+    "ngettext": lambda s, p, n: s if n == 1 else p,
+}
+translator_var = contextvars.ContextVar(
+    "translator",
+    default=translation_defaults,
+)
+
+
+def _(msg):
+    """Localize a message."""
+    return translator_var.get()["gettext"](msg)
+
+
+def n_(singular, plural, n):
+    """
+    Localize a message with pluralization.
+
+    Example:
+        ```
+        n_("{apples_num} apple", "{apples_num}apples", apples_num).format(apples_num=apples_num)
+        ```
+    """
+    return translator_var.get()["ngettext"](singular, plural, n)
+
+
+def localized(function):
+    """
+    Set the translator for the current chat based on the language stored in the database.
+
+    Expects a telegram Update instance to be passed as the first argument. It is used to retrieve chat settings.
+    Inside the decorated function, you can use _() and n_() functions for translations.
+    n_() if you want to use pluralization e.g. formatting a string like "You have %(apples_num)d apples".
+    """
+
+    @wraps(function)
+    async def inner(update: Update, *args, **kwargs):
+        chat_id = update.effective_chat.id
+        settings = await get_chat_settings(chat_id)
+
+        lang_code = settings.get("language", None)
+        if lang_code is None:
+            logger.warning("No language is set for chat %s. Continuing with default (en).", chat_id)
+            lang_code = "en"
+        translation = languages[lang_code]
+
+        translator = {
+            "gettext": make_logged_gettext(translation.gettext, lang_code),
+            "ngettext": make_logged_ngettext(translation.ngettext, lang_code),
+        }
+
+        token = translator_var.set(translator)
+        try:
+            return await function(update, *args, **kwargs)
+        finally:
+            translator_var.reset(token)
+
+    return inner
+
 
 # Database
 conn = sqlite3.connect(Path(__file__).parent.parent / "database.db")
@@ -60,12 +180,6 @@ db.execute(
 
 # Bot start time to measure uptime
 BOT_START_TIME: datetime.datetime = datetime.datetime.now(tz=datetime.UTC)
-
-# Enable logging
-logging.basicConfig(format="%(asctime)s - %(name)s[%(levelname)s]: %(message)s", level=logging.INFO)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
 
 
 # ============================= Database functions =============================
@@ -209,9 +323,10 @@ async def start(update: Update, _: CallbackContext) -> None:
     )
 
 
-async def help_command(update: Update, _: CallbackContext) -> None:
+@localized
+async def help_command(update: Update, __: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
-    await update.message.reply_text("Help yourself, nigga!")
+    await update.message.reply_text(_("Help yourself, nigga!"))
 
 
 async def uptime_command(update: Update, _: CallbackContext) -> None:
@@ -226,12 +341,7 @@ async def uptime_command(update: Update, _: CallbackContext) -> None:
     if days:
         response += f" {days} days" if days > 1 else f" {days} day"
     response += f" {hours} h {minutes} min {seconds} sec"
-    await update.message.reply_text(response)
-
-
-async def echo(update: Update, _: CallbackContext) -> None:
-    """Echo the user message."""
-    await update.message.reply_text(update.message.text)
+    await update.message.reply_text(_(response))
 
 
 async def fart_callback(update: Update, context: CallbackContext) -> None:
@@ -286,22 +396,35 @@ async def stats_command(update: Update, _: CallbackContext) -> None:
             logger.debug("Unknown chat type: %s", update.message.chat.type)
 
 
-async def _send_private_stats(update: Update, _: CallbackContext, chat_farts: list) -> None:
+@localized
+async def _send_private_stats(update: Update, __: CallbackContext, chat_farts: list) -> None:
     """Send message with private farts."""
     user_id = update.message.from_user.id
     all_farts = db.execute("SELECT user_id, send_datetime FROM farts WHERE user_id = ?", (user_id,)).fetchall()
+    num_of_chat_farts = len(chat_farts)
+    num_of_total_farts = len(all_farts)
     await update.message.reply_text(
-        f"Bro, you farted {len(chat_farts)} time just here and {len(all_farts)} farts in general!"
-        f"\nDamn! Are you alright?"
+        n_(
+            "Bro, you farted only {num_of_chat_farts} time here",
+            "Bro, you farted {num_of_chat_farts} times just here",
+            num_of_chat_farts,
+        ).format(num_of_chat_farts=num_of_chat_farts)
+        + n_(
+            " and only {num_of_total_farts} fart in general!\n",
+            " and {num_of_total_farts} farts in general!\n",
+            num_of_total_farts,
+        ).format(num_of_total_farts=num_of_total_farts)
     )
 
 
-async def _send_group_stats(update: Update, _: CallbackContext, farts: list) -> None:
+@localized
+async def _send_group_stats(update: Update, __: CallbackContext, farts: list) -> None:
     """Send message with group farts statistics."""
-    await update.message.reply_text(f"Nigga, I found at least {len(farts)} farts in this chat, it's getting hot!")
+    await update.message.reply_text(_(f"Nigga, I found at least {len(farts)} farts in this chat, it's getting hot!"))
 
 
-async def settings_command(update: Update, _: CallbackContext) -> None:
+@localized
+async def settings_command(update: Update, __: CallbackContext) -> None:
     """Send current chat settings with inline keyboard to change them."""
     chat_id = update.message.chat_id
 
@@ -311,15 +434,18 @@ async def settings_command(update: Update, _: CallbackContext) -> None:
     # Create inline keyboard with options
     keyboard = [
         [
-            telegram.InlineKeyboardButton("Timezone", callback_data="setting_timezone_change"),
-            telegram.InlineKeyboardButton("Language", callback_data="setting_language_change"),
+            telegram.InlineKeyboardButton(_("Timezone"), callback_data="setting_timezone_change"),
+            telegram.InlineKeyboardButton(_("Language"), callback_data="setting_language_change"),
         ]
     ]
 
-    await update.message.reply_text(f"your settings: {settings}", reply_markup=telegram.InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        _(f"your settings: {settings}"), reply_markup=telegram.InlineKeyboardMarkup(keyboard)
+    )
 
 
-async def setting_change_callback(update: Update, _: CallbackContext) -> None:
+@localized
+async def setting_change_callback(update: Update, __: CallbackContext) -> None:
     """
     Handle callback query for changing chat settings.
 
@@ -329,18 +455,19 @@ async def setting_change_callback(update: Update, _: CallbackContext) -> None:
     setting_name = query.data.split("_")[1]
 
     if setting_name == "timezone":
-        await query.edit_message_text("Timezone change is not implemented yet.")
+        await query.edit_message_text(_("Timezone change is not implemented yet."))
     elif setting_name == "language":
         keyboard = [
             [telegram.InlineKeyboardButton(lang, callback_data=f"setting_language_set_{lang}")]
             for lang in SUPPORTED_LANGUAGES
         ]
-        await query.edit_message_text("Select language:", reply_markup=telegram.InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text(_("Select language:"), reply_markup=telegram.InlineKeyboardMarkup(keyboard))
     else:
         logger.warning("Unknown setting name in callback query: %s", setting_name)
 
 
-async def setting_language_set_callback(update: Update, _: CallbackContext) -> None:
+@localized
+async def setting_language_set_callback(update: Update, __: CallbackContext) -> None:
     """Handle callback query for setting language."""
     query: CallbackQuery = update.callback_query
     language = query.data.split("_")[-1]
@@ -348,7 +475,7 @@ async def setting_language_set_callback(update: Update, _: CallbackContext) -> N
     # Change language in the database
     chat_id = update.effective_chat.id
     await update_chat_settings(chat_id, language=language)
-    await query.edit_message_text(f"Language changed to {language}.")
+    await query.edit_message_text(_(f"Language changed to {language}."))
 
 
 def main() -> None:

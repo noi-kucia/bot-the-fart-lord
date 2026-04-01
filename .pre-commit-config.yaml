@@ -31,5 +31,13 @@ repos:
     - id: gitleaks
       name: "🔒 Security · Detect hardcoded secrets"
 
+- repo: local
+  hooks:
+    - id: gettext-update
+      name: "🌐 Update translations"
+      entry: bash scripts/update_translations.sh
+      language: system
+      pass_filenames: false
+
 default_language_version:
     python: python3.14
