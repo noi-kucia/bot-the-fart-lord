@@ -53,6 +53,18 @@ def make_logged_gettext(translator, lang_code):
     return wrapped
 
 
+def make_logged_ngettext(translator, lang_code):
+    """Log missing plural translations."""
+
+    def wrapped(singular, plural, n):
+        translated = translator(singular, plural, n)
+        if translated in (singular, plural) and lang_code != "en":  # Message is not translated
+            logger.warning("Missing translation: lang=%s msgid=%r msgid_plural=%r", lang_code, singular, plural)
+        return translated
+
+    return wrapped
+
+
 def needs_compile(po, mo):
     """Check if po needs to be (re)compiled."""
     return not mo.exists() or Path(po).stat().st_mtime > Path(mo).stat().st_mtime
@@ -75,11 +87,32 @@ compile_translations()  # Compile translations on startup if needed
 languages = {
     lang: gettext.translation("messages", localedir=locales_dir, languages=[lang]) for lang in SUPPORTED_LANGUAGES
 }
-translator_var = contextvars.ContextVar("translator", default=lambda x: x)
+
+translation_defaults = {
+    "gettext": lambda x: x,
+    "ngettext": lambda s, p, n: s if n == 1 else p,
+}
+translator_var = contextvars.ContextVar(
+    "translator",
+    default=translation_defaults,
+)
 
 
 def _(msg):
-    return translator_var.get()(msg)
+    """Localize a message."""
+    return translator_var.get()["gettext"](msg)
+
+
+def n_(singular, plural, n):
+    """
+    Localize a message with pluralization.
+
+    Example:
+        ```
+        n_("{apples_num} apple", "{apples_num}apples", apples_num).format(apples_num=apples_num)
+        ```
+    """
+    return translator_var.get()["ngettext"](singular, plural, n)
 
 
 def localized(function):
@@ -87,6 +120,8 @@ def localized(function):
     Set the translator for the current chat based on the language stored in the database.
 
     Expects a telegram Update instance to be passed as the first argument. It is used to retrieve chat settings.
+    Inside the decorated function, you can use _() and n_() functions for translations.
+    n_() if you want to use pluralization e.g. formatting a string like "You have %(apples_num)d apples".
     """
 
     @wraps(function)
@@ -94,12 +129,16 @@ def localized(function):
         chat_id = update.effective_chat.id
         settings = await get_chat_settings(chat_id)
 
-        # Get the language and language_id from the database
         lang_code = settings.get("language", None)
         if lang_code is None:
             logger.warning("No language is set for chat %s. Continuing with default (en).", chat_id)
             lang_code = "en"
-        translator = make_logged_gettext(languages[lang_code].gettext, lang_code)
+        translation = languages[lang_code]
+
+        translator = {
+            "gettext": make_logged_gettext(translation.gettext, lang_code),
+            "ngettext": make_logged_ngettext(translation.ngettext, lang_code),
+        }
 
         token = translator_var.set(translator)
         try:
@@ -362,12 +401,19 @@ async def _send_private_stats(update: Update, __: CallbackContext, chat_farts: l
     """Send message with private farts."""
     user_id = update.message.from_user.id
     all_farts = db.execute("SELECT user_id, send_datetime FROM farts WHERE user_id = ?", (user_id,)).fetchall()
+    num_of_chat_farts = len(chat_farts)
+    num_of_total_farts = len(all_farts)
     await update.message.reply_text(
-        _(
-            "Bro, you farted %(num_of_chat_farts)d time just here and %(num_of_total_farts)d farts in general!"
-            "\nDamn! Are you alright?"
-        )
-        % {"num_of_chat_farts": len(chat_farts), "num_of_total_farts": len(all_farts)}
+        n_(
+            "Bro, you farted only {num_of_chat_farts} time here",
+            "Bro, you farted {num_of_chat_farts} times just here",
+            num_of_chat_farts,
+        ).format(num_of_chat_farts=num_of_chat_farts)
+        + n_(
+            " and only {num_of_total_farts} fart in general!\n",
+            " and {num_of_total_farts} farts in general!\n",
+            num_of_total_farts,
+        ).format(num_of_total_farts=num_of_total_farts)
     )
 
 

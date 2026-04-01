@@ -13,7 +13,7 @@ done
 echo -e "Found ${#LANGS[@]} languages in the locales/ directory: \n" "${LANGS[@]}"
 
 # Update .pot
-xgettext -o locales/messages.pot -k_ -kgettext -kgettext_noop --from-code=UTF-8 src/main.py
+xgettext -o locales/messages.pot -k_ -kgettext -kgettext_noop -kn_:1,2 --from-code=UTF-8 src/main.py
 
 # Update .po
 for lang in "${LANGS[@]}"; do
