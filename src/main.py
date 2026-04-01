@@ -1,10 +1,13 @@
 """Main file."""
 
 import asyncio
+import contextvars
 import datetime
+import gettext
 import logging
 import random
 import sqlite3
+from functools import wraps
 from os import environ
 from pathlib import Path
 from typing import Literal
@@ -27,7 +30,48 @@ load_dotenv(Path(__file__).parent / "env/.env")
 
 DEBUG = environ.get("DEBUG", "false").lower() == "true"
 
+# Localization
 SUPPORTED_LANGUAGES = ["en", "pl", "ru"]
+languages = {
+    lang: gettext.translation(
+        "messages", localedir=Path(__file__).parent.parent / "locales", languages=[lang], fallback=True
+    )
+    for lang in SUPPORTED_LANGUAGES
+}
+translator_var = contextvars.ContextVar("translator", default=lambda x: x)
+
+
+def _(msg):
+    return translator_var.get()(msg)
+
+
+def localized(function):
+    """
+    Set the translator for the current chat based on the language stored in the database.
+
+    Expects a telegram Update instance to be passed as the first argument. It is used to retrieve chat settings.
+    """
+
+    @wraps(function)
+    async def inner(update: Update, *args, **kwargs):
+        chat_id = update.effective_chat.id
+        settings = await get_chat_settings(chat_id)
+
+        # Get the language and language_id from the database
+        lang_code = settings.get("language", None)
+        if lang_code is None:
+            logger.warning("No language is set for chat %s. Continuing with default (en).", chat_id)
+            lang_code = "en"
+        translator = languages[lang_code].gettext
+
+        token = translator_var.set(translator)
+        try:
+            return await function(update, *args, **kwargs)
+        finally:
+            translator_var.reset(token)
+
+    return inner
+
 
 # Database
 conn = sqlite3.connect(Path(__file__).parent.parent / "database.db")
@@ -209,9 +253,10 @@ async def start(update: Update, _: CallbackContext) -> None:
     )
 
 
+@localized
 async def help_command(update: Update, _: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
-    await update.message.reply_text("Help yourself, nigga!")
+    await update.message.reply_text(_("Help yourself, nigga!"))
 
 
 async def uptime_command(update: Update, _: CallbackContext) -> None:
