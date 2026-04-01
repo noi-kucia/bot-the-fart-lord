@@ -41,6 +41,18 @@ logger = logging.getLogger(__name__)
 locales_dir = Path(__file__).parent.parent / "locales"
 
 
+def make_logged_gettext(translator, lang_code):
+    """Log missing translations."""
+
+    def wrapped(msg):
+        translated = translator(msg)
+        if translated == msg and lang_code != "en":  # Message is not translated
+            logger.warning("Missing translation: lang=%s msgid=%r", lang_code, msg)
+        return translated
+
+    return wrapped
+
+
 def needs_compile(po, mo):
     """Check if po needs to be (re)compiled."""
     return not mo.exists() or Path(po).stat().st_mtime > Path(mo).stat().st_mtime
@@ -86,7 +98,7 @@ def localized(function):
         if lang_code is None:
             logger.warning("No language is set for chat %s. Continuing with default (en).", chat_id)
             lang_code = "en"
-        translator = languages[lang_code].gettext
+        translator = make_logged_gettext(languages[lang_code].gettext, lang_code)
 
         token = translator_var.set(translator)
         try:
